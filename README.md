@@ -1,1 +1,122 @@
 # RoutingService
+
+## Sumário
+- [Visão Geral](#visão-geral)
+- [Tecnologias](#tecnologias)
+- [Requisitos](#requisitos)
+- [Instalação](#instalação)
+- [Configuração](#configuração)
+- [Execução](#execução)
+  - [Via .NET CLI](#via-net-cli)
+  - [Via Visual Studio 2022](#via-visual-studio-2022)
+  - [Via Docker](#via-docker)
+- [Testes](#testes)
+- [Estrutura do Projeto](#estrutura-do-projeto)
+- [CI / CD](#ci--cd)
+- [Contribuição](#contribuição)
+- [Licença](#licença)
+- [Contato](#contato)
+
+## Visão Geral
+O `RoutingService` é um serviço desenvolvido em `.NET 8` que fornece funcionalidades de roteamento, como cálculo de rotas, balanceamento e cache de rotas. Este repositório contém a API, testes e scripts de suporte para execução local e em contêiner.
+
+## Tecnologias
+- `.NET 8`
+- C#
+- `ASP.NET Core` (se aplicável)
+- `xUnit` ou outro framework de testes utilizado
+- Docker (opcional)
+
+## Requisitos
+- .NET SDK 8.x instalado: [Download .NET SDK](https://dotnet.microsoft.com/)
+- Visual Studio 2022 (recomendado) com workload de .NET
+- Docker (opcional, para execução em contêiner)
+
+## Instalação
+1. Clone o repositório:
+
+    ```bash
+    git clone https://github.com/leandrosflora/RoutingService.git
+    cd RoutingService
+    ```
+
+2. Restaure pacotes e compile:
+
+    ```bash
+    dotnet restore
+    dotnet build --configuration Release
+    ```
+
+## Configuração
+- As configurações do serviço devem ser definidas em `appsettings.json` ou através de variáveis de ambiente.
+- Para valores sensíveis (como chaves e conexões), prefira o uso de variáveis de ambiente ou o Azure Key Vault.
+
+Exemplo de variáveis de ambiente usadas pelo serviço:
+
+- `ROUTINGSERVICE__DATABASE__CONNECTIONSTRING`
+- `ROUTINGSERVICE__API__KEY`
+
+Para definir variáveis no Windows PowerShell:
+
+$Env:ROUTINGSERVICE__DATABASE__CONNECTIONSTRING = "Server=...;Database=...;User Id=...;Password=...;"
+
+## Execução
+### Via .NET CLI
+Para executar o projeto API localmente via CLI:
+
+dotnet run --project src/RoutingService.Api
+
+Substitua o caminho do projeto caso seja diferente.
+
+### Via Visual Studio 2022
+- Abra a solução no Visual Studio 2022.
+- Defina o projeto de inicialização: clique com o botão direito no projeto e selecione `Set as Startup Project`.
+- Para executar em modo debug, use __Debug > Start Debugging__ ou pressione `F5`.
+- Para executar sem debug, use __Debug > Start Without Debugging__.
+
+Ajuste as configurações de lançamento em `launchSettings.json` conforme necessário.
+
+### Via Docker
+Se o repositório inclui um `Dockerfile`, crie a imagem e execute o contêiner:
+
+docker build -t routingservice:latest .
+docker run -e ROUTINGSERVICE__DATABASE__CONNECTIONSTRING="..." -p 5000:80 routingservice:latest
+
+Se houver `docker-compose.yml`:
+
+docker compose up --build
+
+## Testes
+Execute a suíte de testes com:
+
+dotnet test
+
+Se os testes estiverem em um projeto separado, execute apontando para o projeto correspondente.
+
+## Estrutura do Projeto
+Estrutura sugerida (ajuste conforme o repositório real):
+
+src/
+  RoutingService.Api/        # API
+  RoutingService.Core/       # Lógica de domínio
+  RoutingService.Infrastructure/ # Acesso a dados, integrações
+tests/
+  RoutingService.Tests/      # Testes unitários e de integração
+Dockerfile
+docker-compose.yml
+README.md
+
+## CI / CD
+- Recomenda-se uma pipeline que execute: `dotnet restore`, `dotnet build`, `dotnet test`, análise estática (se aplicável) e publish.
+- Exemplo de passos em GitHub Actions: checkout, setup-dotnet (8.x), restore, build, test e publish como artefato ou push de imagem Docker.
+
+## Contribuição
+Leia `CONTRIBUTING.md` para diretrizes de contribuição (padrões de código, processos de PR, testes exigidos).
+- Crie uma branch com o padrão `feature/<descrição>` ou `bugfix/<descrição>`.
+- Abra um PR apontando para `master` e descreva as mudanças.
+
+## Licença
+Adicione a licença do projeto (por exemplo, MIT) no arquivo `LICENSE`.
+
+## Contato
+Para dúvidas ou suporte, abra uma _issue_ no repositório ou contate o mantenedor.
