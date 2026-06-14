@@ -797,3 +797,71 @@ Verifique:
 - Publicar `docker-compose.yml` para PostgreSQL, Redis e API.
 - Adicionar CI com restore, build, testes e análise estática.
 - Documentar política de observabilidade com métricas e tracing distribuído.
+
+## Kafka local
+
+O serviço possui integração Kafka real via `Confluent.Kafka`, mas mantém modo mock para desenvolvimento sem broker. A configuração usa Options Pattern em `Kafka`:
+
+```json
+{
+  "Kafka": {
+    "BootstrapServers": "localhost:9092",
+    "ConsumerGroupId": "checkout-service",
+    "UseMock": true,
+    "Topics": {
+      "ShippingQuoteRequested": "checkout.shipping.quote.requested",
+      "ShippingPromiseCalculated": "shipping.promise.calculated"
+    }
+  }
+}
+```
+
+Para teste end-to-end com o broker exposto pelo `docker-compose` do repositório de arquitetura, execute a API com `Kafka:UseMock=false` e broker em `localhost:9092`:
+
+```bash
+export Kafka__UseMock=false
+export Kafka__BootstrapServers=localhost:9092
+export Kafka__ConsumerGroupId=checkout-service
+export Kafka__Topics__ShippingQuoteRequested=checkout.shipping.quote.requested
+export Kafka__Topics__ShippingPromiseCalculated=shipping.promise.calculated
+dotnet run --project RoutingService.csproj
+```
+
+### Publicação de `checkout.shipping.quote.requested`
+
+A publicação ocorre ao chamar `POST /routes/search` quando a rota é calculada. O request HTTP continua respondendo mesmo se o broker estiver indisponível; a falha é registrada em log com `topic`, `message key`, `eventType` e `correlationId`.
+
+Exemplo com correlação e checkout associado:
+
+```bash
+curl -X POST http://localhost:5099/routes/search \
+  -H "Content-Type: application/json" \
+  -H "X-Correlation-Id: local-correlation-001" \
+  -H "X-Checkout-Id: 55555555-5555-5555-5555-555555555555" \
+  -d '{
+    "originNodeId": "11111111-1111-1111-1111-111111111111",
+    "destinationPostalCode": "20000-000",
+    "package": {
+      "weightKg": 2.5,
+      "cubicWeightKg": 3.1,
+      "isFragile": false,
+      "isRestricted": false
+    },
+    "requestedAtUtc": "2026-06-10T12:00:00Z",
+    "maxOptions": 3
+  }'
+```
+
+### Consumo de `shipping.promise.calculated`
+
+Com `Kafka:UseMock=false`, o worker `ShippingPromiseCalculatedConsumer` assina o tópico `shipping.promise.calculated` usando o `ConsumerGroupId` configurado e registra a promise em armazenamento idempotente em memória por `eventId`, `correlationId` e `checkoutId`.
+
+### Validação no Kafka UI
+
+1. Abra `http://localhost:8088`.
+2. Confirme que o broker configurado no serviço é `localhost:9092`; a porta `8088` é apenas a UI.
+3. Acesse o tópico `checkout.shipping.quote.requested` e verifique uma mensagem após chamar `POST /routes/search`.
+4. Confira no envelope os campos canônicos `eventId`, `eventType`, `schemaVersion`, `occurredAt`, `correlationId`, `producer` e `payload`.
+5. Publique uma mensagem compatível em `shipping.promise.calculated` e acompanhe os logs do serviço para confirmar o consumo/idempotência.
+
+> Limitação atual: este microserviço não possui persistência própria de checkout; por isso o registro de promise consumida é idempotente em memória. Em produção, substitua `IShippingPromiseStore` por implementação persistente dentro do limite de responsabilidade do serviço dono do checkout/promise.
