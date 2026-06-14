@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using RoutingService.Application.Ports;
 using RoutingService.Contracts;
+using RoutingService.Contracts.Events;
 using RoutingService.Graph;
 
 namespace RoutingService.Application;
@@ -13,19 +14,34 @@ public sealed class RouteSearchService
     private readonly RouteGraphStore _graphStore;
     private readonly TimeDependentRouteEngine _routeEngine;
     private readonly IRouteSearchCache _cache;
+    private readonly IEventPublisher _eventPublisher;
+    private readonly ILogger<RouteSearchService> _logger;
 
     public RouteSearchService(
         RouteGraphStore graphStore,
         TimeDependentRouteEngine routeEngine,
-        IRouteSearchCache cache)
+        IRouteSearchCache cache,
+        IEventPublisher eventPublisher,
+        ILogger<RouteSearchService> logger)
     {
         _graphStore = graphStore;
         _routeEngine = routeEngine;
         _cache = cache;
+        _eventPublisher = eventPublisher;
+        _logger = logger;
     }
 
     public async Task<SearchRoutesResponse> SearchAsync(
         SearchRoutesRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await SearchAsync(request, null, null, cancellationToken);
+    }
+
+    public async Task<SearchRoutesResponse> SearchAsync(
+        SearchRoutesRequest request,
+        string? correlationId,
+        Guid? checkoutId,
         CancellationToken cancellationToken)
     {
         Validate(request);
@@ -36,7 +52,11 @@ public sealed class RouteSearchService
         var cached = await _cache.GetAsync(cacheKey, cancellationToken);
 
         if (cached is not null)
-            return cached with { Source = "Cache" };
+        {
+            var cachedResponse = cached with { Source = "Cache" };
+            await PublishShippingQuoteRequestedAsync(request, requestedAt, graph.Version, cachedResponse, correlationId, checkoutId, cancellationToken);
+            return cachedResponse;
+        }
 
         var postalCode = NormalizePostalCode(request.DestinationPostalCode);
         var destinationNodeIds = graph.Coverages
@@ -49,6 +69,7 @@ public sealed class RouteSearchService
         {
             var empty = new SearchRoutesResponse(graph.Version, "Calculated", []);
             await _cache.SetAsync(cacheKey, empty, CacheTtl, cancellationToken);
+            await PublishShippingQuoteRequestedAsync(request, requestedAt, graph.Version, empty, correlationId, checkoutId, cancellationToken);
             return empty;
         }
 
@@ -66,7 +87,51 @@ public sealed class RouteSearchService
             calculatedRoutes.Select(x => Map(graph.Version, x)).ToList());
 
         await _cache.SetAsync(cacheKey, response, CacheTtl, cancellationToken);
+        await PublishShippingQuoteRequestedAsync(request, requestedAt, graph.Version, response, correlationId, checkoutId, cancellationToken);
         return response;
+    }
+
+
+    private async Task PublishShippingQuoteRequestedAsync(
+        SearchRoutesRequest request,
+        DateTimeOffset requestedAt,
+        long networkVersion,
+        SearchRoutesResponse response,
+        string? correlationId,
+        Guid? checkoutId,
+        CancellationToken cancellationToken)
+    {
+        var resolvedCorrelationId = string.IsNullOrWhiteSpace(correlationId)
+            ? Guid.NewGuid().ToString("N")
+            : correlationId.Trim();
+
+        var payload = new ShippingQuoteRequestedPayload(
+            checkoutId,
+            request.OriginNodeId,
+            request.DestinationPostalCode,
+            request.Package,
+            requestedAt,
+            Math.Clamp(request.MaxOptions, 1, 5),
+            networkVersion,
+            response.Routes);
+
+        var envelope = new EventEnvelope<ShippingQuoteRequestedPayload>(
+            Guid.NewGuid(),
+            "checkout.shipping.quote.requested",
+            "1.0",
+            DateTimeOffset.UtcNow,
+            resolvedCorrelationId,
+            "checkout-service",
+            payload);
+
+        var messageKey = checkoutId?.ToString("N") ?? request.DestinationPostalCode;
+        await _eventPublisher.PublishAsync(envelope, messageKey, cancellationToken);
+
+        _logger.LogInformation(
+            "Shipping quote requested event emitted key={MessageKey} correlationId={CorrelationId} checkoutId={CheckoutId}",
+            messageKey,
+            resolvedCorrelationId,
+            checkoutId);
     }
 
     private static RouteOptionResponse Map(long networkVersion, CalculatedRoute route)

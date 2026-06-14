@@ -25,12 +25,15 @@ public static class RoutingEndpoints
 
     private static async Task<IResult> SearchRoutesAsync(
         SearchRoutesRequest request,
+        HttpContext httpContext,
         RouteSearchService service,
         CancellationToken cancellationToken)
     {
         try
         {
-            var response = await service.SearchAsync(request, cancellationToken);
+            var correlationId = ResolveHeader(httpContext, "X-Correlation-Id") ?? httpContext.TraceIdentifier;
+            var checkoutId = TryResolveGuidHeader(httpContext, "X-Checkout-Id");
+            var response = await service.SearchAsync(request, correlationId, checkoutId, cancellationToken);
             return Results.Ok(response);
         }
         catch (ArgumentException exception)
@@ -44,6 +47,19 @@ public static class RoutingEndpoints
                 detail: exception.Message,
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
+    }
+
+    private static string? ResolveHeader(HttpContext httpContext, string name)
+    {
+        return httpContext.Request.Headers.TryGetValue(name, out var values)
+            ? values.FirstOrDefault()
+            : null;
+    }
+
+    private static Guid? TryResolveGuidHeader(HttpContext httpContext, string name)
+    {
+        var value = ResolveHeader(httpContext, name);
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
     }
 
     private static async Task<IResult> CreateNodeAsync(
