@@ -19,25 +19,44 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
-builder.Services.AddDbContext<RoutingDbContext>(options =>
-{
-    options.UseNpgsql(
-        builder.Configuration.GetConnectionString("RoutingDb")
-        ?? "Host=localhost;Database=routing;Username=postgres;Password=postgres");
-});
+var useMockRepository = builder.Configuration.GetValue<bool>("Routing:UseMockRepository");
 
-builder.Services.AddStackExchangeRedisCache(options =>
+if (!useMockRepository)
 {
-    options.Configuration =
-        builder.Configuration.GetConnectionString("Redis")
-        ?? "localhost:6379";
+    builder.Services.AddDbContext<RoutingDbContext>(options =>
+    {
+        options.UseNpgsql(
+            builder.Configuration.GetConnectionString("RoutingDb")
+            ?? "Host=localhost;Database=routing;Username=postgres;Password=postgres");
+    });
+}
 
-    options.InstanceName = "routing:";
-});
+if (useMockRepository)
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+else
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration =
+            builder.Configuration.GetConnectionString("Redis")
+            ?? "localhost:6379";
+
+        options.InstanceName = "routing:";
+    });
+}
 
 builder.Services.AddScoped<RouteSearchService>();
 builder.Services.AddScoped<RouteGraphLoader>();
-builder.Services.AddScoped<IRoutingNetworkRepository, RoutingNetworkRepository>();
+if (useMockRepository)
+{
+    builder.Services.AddScoped<IRoutingNetworkRepository, MockRoutingNetworkRepository>();
+}
+else
+{
+    builder.Services.AddScoped<IRoutingNetworkRepository, RoutingNetworkRepository>();
+}
 builder.Services.AddScoped<IRouteSearchCache, RedisRouteSearchCache>();
 
 builder.Services.AddSingleton<TimeDependentRouteEngine>();
@@ -45,8 +64,11 @@ builder.Services.AddSingleton<RouteGraphStore>();
 
 builder.Services.AddHostedService<RouteGraphRefreshWorker>();
 
-builder.Services.AddHealthChecks()
-    .AddDbContextCheck<RoutingDbContext>();
+var healthChecks = builder.Services.AddHealthChecks();
+if (!useMockRepository)
+{
+    healthChecks.AddDbContextCheck<RoutingDbContext>();
+}
 
 var app = builder.Build();
 

@@ -47,7 +47,8 @@ A aplicação é exposta como **ASP.NET Core Minimal API** e organiza as respons
 - **Cache Redis** com TTL curto para respostas de busca.
 - **Outbox** para registrar eventos de alteração da malha logística.
 - **Swagger/OpenAPI** habilitado em ambiente de desenvolvimento.
-- **Health check** em `/health` com verificação do `DbContext`.
+- **Health check** em `/health` com verificação do `DbContext` quando o repositório real está habilitado.
+- **Feature flag de repositório mockado** para desenvolvimento sem banco modelado.
 
 ## Arquitetura
 
@@ -163,8 +164,8 @@ Controla a versão da malha por região. Alterações em nós e lanes incrementa
 ## Pré-requisitos
 
 - .NET SDK 8.x.
-- PostgreSQL acessível pela aplicação.
-- Redis acessível pela aplicação.
+- PostgreSQL acessível pela aplicação, exceto quando `Routing:UseMockRepository=true`.
+- Redis acessível pela aplicação, exceto quando `Routing:UseMockRepository=true`, pois o cache passa a ser em memória.
 - Opcional: Visual Studio 2022 ou Rider.
 - Opcional: `dotnet-ef` para criação/aplicação de migrations.
 
@@ -185,7 +186,8 @@ As configurações padrão ficam em `appsettings.json`:
     "Redis": "localhost:6379"
   },
   "Routing": {
-    "Region": "Brasil Sudeste"
+    "Region": "Brasil Sudeste",
+    "UseMockRepository": false
   }
 }
 ```
@@ -199,6 +201,7 @@ Em ASP.NET Core, `:` pode ser substituído por `__` em variáveis de ambiente.
 | `ConnectionStrings__RoutingDb` | String de conexão do PostgreSQL. | `Host=localhost;Database=routing;Username=postgres;Password=postgres` |
 | `ConnectionStrings__Redis` | Endpoint do Redis. | `localhost:6379` |
 | `Routing__Region` | Região da malha carregada no snapshot. | `Brasil Sudeste` |
+| `Routing__UseMockRepository` | Quando `true`, troca PostgreSQL/Redis por dados mockados no repository e cache em memória. | `true` |
 | `ASPNETCORE_ENVIRONMENT` | Ambiente da aplicação. | `Development` |
 
 Exemplo no Linux/macOS:
@@ -207,6 +210,7 @@ Exemplo no Linux/macOS:
 export ConnectionStrings__RoutingDb="Host=localhost;Database=routing;Username=postgres;Password=postgres"
 export ConnectionStrings__Redis="localhost:6379"
 export Routing__Region="Brasil Sudeste"
+export Routing__UseMockRepository="true"
 ```
 
 Exemplo no PowerShell:
@@ -215,6 +219,47 @@ Exemplo no PowerShell:
 $Env:ConnectionStrings__RoutingDb = "Host=localhost;Database=routing;Username=postgres;Password=postgres"
 $Env:ConnectionStrings__Redis = "localhost:6379"
 $Env:Routing__Region = "Brasil Sudeste"
+$Env:Routing__UseMockRepository = "true"
+```
+
+
+### Feature flag para repository mockado
+
+Enquanto a base de dados do microserviço não estiver modelada, habilite `Routing:UseMockRepository` para carregar um snapshot determinístico em memória e evitar dependência de PostgreSQL e Redis durante o desenvolvimento. Em `appsettings.Development.json`, essa flag já fica habilitada por padrão.
+
+Quando `Routing:UseMockRepository = true`:
+
+- `IRoutingNetworkRepository` usa `MockRoutingNetworkRepository`;
+- o cache distribuído usa memória local (`AddDistributedMemoryCache`) em vez de Redis;
+- o health check não registra a verificação de `RoutingDbContext`;
+- `POST /network/reload` carrega uma malha mockada com versão `1`.
+
+Dados principais do snapshot mockado:
+
+| Tipo | Identificador | Descrição |
+| --- | --- | --- |
+| Nó origem | `11111111-1111-1111-1111-111111111111` | `SP-FUL-01` |
+| Hub | `22222222-2222-2222-2222-222222222222` | `CPQ-HUB-01` |
+| Destino RJ | `33333333-3333-3333-3333-333333333333` | `RIO-DLV-01`, cobre CEPs `20000000` a `28999999` |
+| Destino BH | `44444444-4444-4444-4444-444444444444` | `BHZ-DLV-01`, cobre CEPs `30000000` a `39999999` |
+
+Exemplo para buscar uma rota com o mock habilitado:
+
+```bash
+curl -X POST http://localhost:5099/routes/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "originNodeId": "11111111-1111-1111-1111-111111111111",
+    "destinationPostalCode": "20000-000",
+    "package": {
+      "weightKg": 2.5,
+      "cubicWeightKg": 3.1,
+      "isFragile": false,
+      "isRestricted": false
+    },
+    "requestedAtUtc": "2026-06-10T12:00:00Z",
+    "maxOptions": 3
+  }'
 ```
 
 ## Executando localmente
@@ -297,7 +342,7 @@ Pontos importantes:
 
 ### `GET /health`
 
-Verifica a saúde da aplicação e do `RoutingDbContext`.
+Verifica a saúde da aplicação. Quando `Routing:UseMockRepository` está desabilitado, também verifica o `RoutingDbContext`.
 
 Resposta esperada em caso saudável:
 
