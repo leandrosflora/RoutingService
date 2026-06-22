@@ -8,7 +8,25 @@ using RoutingService.Infrastructure.Cache;
 using RoutingService.Infrastructure.Persistence;
 using RoutingService.Infrastructure.Workers;
 
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+
 var builder = WebApplication.CreateBuilder(args);
+var serviceName = builder.Environment.ApplicationName;
+var otlpEndpoint = builder.Configuration["OpenTelemetry:OtlpEndpoint"] ?? "http://localhost:5107";
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(serviceName))
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddOtlpExporter(options => options.Endpoint = new Uri(otlpEndpoint)))
+    .WithMetrics(metrics => metrics
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -72,6 +90,8 @@ if (!useMockRepository)
 }
 
 var app = builder.Build();
+
+app.UseOpenTelemetryPrometheusScrapingEndpoint("/metrics");
 
 if (app.Environment.IsDevelopment())
 {
