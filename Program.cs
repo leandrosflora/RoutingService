@@ -27,7 +27,7 @@ if (!useMockRepository)
     {
         options.UseNpgsql(
             builder.Configuration.GetConnectionString("RoutingDb")
-            ?? "Host=localhost;Database=routing;Username=postgres;Password=postgres");
+            ?? "Host=localhost;Port=5432;Database=logistica_envios;Username=logistica;Password=logistica;Search Path=routing,public");
     });
 }
 
