@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using RoutingService.Application.Ports;
 using RoutingService.Contracts;
-using RoutingService.Contracts.Events;
 using RoutingService.Graph;
 
 namespace RoutingService.Application;
@@ -14,20 +13,20 @@ public sealed class RouteSearchService
     private readonly RouteGraphStore _graphStore;
     private readonly TimeDependentRouteEngine _routeEngine;
     private readonly IRouteSearchCache _cache;
-    private readonly IEventPublisher _eventPublisher;
+    private readonly ICalculatedRouteStore _routeStore;
     private readonly ILogger<RouteSearchService> _logger;
 
     public RouteSearchService(
         RouteGraphStore graphStore,
         TimeDependentRouteEngine routeEngine,
         IRouteSearchCache cache,
-        IEventPublisher eventPublisher,
+        ICalculatedRouteStore routeStore,
         ILogger<RouteSearchService> logger)
     {
         _graphStore = graphStore;
         _routeEngine = routeEngine;
         _cache = cache;
-        _eventPublisher = eventPublisher;
+        _routeStore = routeStore;
         _logger = logger;
     }
 
@@ -35,16 +34,19 @@ public sealed class RouteSearchService
         SearchRoutesRequest request,
         CancellationToken cancellationToken)
     {
-        return await SearchAsync(request, null, null, cancellationToken);
+        return await SearchAsync(request, null, cancellationToken);
     }
 
     public async Task<SearchRoutesResponse> SearchAsync(
         SearchRoutesRequest request,
         string? correlationId,
-        Guid? checkoutId,
         CancellationToken cancellationToken)
     {
         Validate(request);
+
+        var resolvedCorrelationId = string.IsNullOrWhiteSpace(correlationId)
+            ? "not-provided"
+            : correlationId.Trim();
 
         var requestedAt = (request.RequestedAtUtc ?? DateTimeOffset.UtcNow).ToUniversalTime();
         var graph = _graphStore.Current;
@@ -54,7 +56,7 @@ public sealed class RouteSearchService
         if (cached is not null)
         {
             var cachedResponse = cached with { Source = "Cache" };
-            await PublishShippingQuoteRequestedAsync(request, requestedAt, graph.Version, cachedResponse, correlationId, checkoutId, cancellationToken);
+            await SaveRouteDetailsAsync(cachedResponse, cancellationToken);
             return cachedResponse;
         }
 
@@ -69,7 +71,6 @@ public sealed class RouteSearchService
         {
             var empty = new SearchRoutesResponse(graph.Version, "Calculated", []);
             await _cache.SetAsync(cacheKey, empty, CacheTtl, cancellationToken);
-            await PublishShippingQuoteRequestedAsync(request, requestedAt, graph.Version, empty, correlationId, checkoutId, cancellationToken);
             return empty;
         }
 
@@ -87,51 +88,30 @@ public sealed class RouteSearchService
             calculatedRoutes.Select(x => Map(graph.Version, x)).ToList());
 
         await _cache.SetAsync(cacheKey, response, CacheTtl, cancellationToken);
-        await PublishShippingQuoteRequestedAsync(request, requestedAt, graph.Version, response, correlationId, checkoutId, cancellationToken);
+        await SaveRouteDetailsAsync(response, cancellationToken);
+        _logger.LogInformation(
+            "Routes calculated routeCount={RouteCount} correlationId={CorrelationId}",
+            response.Routes.Count,
+            resolvedCorrelationId);
+
         return response;
     }
 
 
-    private async Task PublishShippingQuoteRequestedAsync(
-        SearchRoutesRequest request,
-        DateTimeOffset requestedAt,
-        long networkVersion,
-        SearchRoutesResponse response,
-        string? correlationId,
-        Guid? checkoutId,
-        CancellationToken cancellationToken)
+    public Task<RouteOptionResponse?> GetRouteAsync(string routeId, CancellationToken cancellationToken)
     {
-        var resolvedCorrelationId = string.IsNullOrWhiteSpace(correlationId)
-            ? Guid.NewGuid().ToString("N")
-            : correlationId.Trim();
+        if (string.IsNullOrWhiteSpace(routeId))
+            throw new ArgumentException("RouteId is required", nameof(routeId));
 
-        var payload = new ShippingQuoteRequestedPayload(
-            checkoutId,
-            request.OriginNodeId,
-            request.DestinationPostalCode,
-            request.Package,
-            requestedAt,
-            Math.Clamp(request.MaxOptions, 1, 5),
-            networkVersion,
-            response.Routes);
+        return _routeStore.GetAsync(routeId.Trim(), cancellationToken);
+    }
 
-        var envelope = new EventEnvelope<ShippingQuoteRequestedPayload>(
-            Guid.NewGuid(),
-            "checkout.shipping.quote.requested",
-            "1.0",
-            DateTimeOffset.UtcNow,
-            resolvedCorrelationId,
-            "checkout-service",
-            payload);
-
-        var messageKey = checkoutId?.ToString("N") ?? request.DestinationPostalCode;
-        await _eventPublisher.PublishAsync(envelope, messageKey, cancellationToken);
-
-        _logger.LogInformation(
-            "Shipping quote requested event emitted key={MessageKey} correlationId={CorrelationId} checkoutId={CheckoutId}",
-            messageKey,
-            resolvedCorrelationId,
-            checkoutId);
+    private async Task SaveRouteDetailsAsync(SearchRoutesResponse response, CancellationToken cancellationToken)
+    {
+        foreach (var route in response.Routes)
+        {
+            await _routeStore.SaveAsync(route, cancellationToken);
+        }
     }
 
     private static RouteOptionResponse Map(long networkVersion, CalculatedRoute route)

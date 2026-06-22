@@ -1,7 +1,5 @@
 using RoutingService.Application;
-using RoutingService.Application.Ports;
 using RoutingService.Contracts;
-using RoutingService.Graph;
 
 namespace RoutingService.Api;
 
@@ -9,21 +7,14 @@ public static class RoutingEndpoints
 {
     public static IEndpointRouteBuilder MapRoutingEndpoints(this IEndpointRouteBuilder app)
     {
-        var routes = app.MapGroup("/routes").WithTags("Routes");
-        routes.MapPost("/search", SearchRoutesAsync);
-
-        var network = app.MapGroup("/network").WithTags("Network");
-        network.MapPost("/nodes", CreateNodeAsync);
-        network.MapPost("/lanes", CreateLaneAsync);
-        network.MapPut("/lanes/{laneId:guid}", UpdateLaneAsync);
-        network.MapPatch("/lanes/{laneId:guid}/status", ChangeLaneStatusAsync);
-        network.MapGet("/version", GetNetworkVersionAsync);
-        network.MapPost("/reload", ReloadNetworkAsync);
+        var routes = app.MapGroup("/v1/routes").WithTags("Routes");
+        routes.MapPost("/calculate", CalculateRoutesAsync);
+        routes.MapGet("/{routeId}", GetRouteAsync);
 
         return app;
     }
 
-    private static async Task<IResult> SearchRoutesAsync(
+    private static async Task<IResult> CalculateRoutesAsync(
         SearchRoutesRequest request,
         HttpContext httpContext,
         RouteSearchService service,
@@ -32,8 +23,7 @@ public static class RoutingEndpoints
         try
         {
             var correlationId = ResolveHeader(httpContext, "X-Correlation-Id") ?? httpContext.TraceIdentifier;
-            var checkoutId = TryResolveGuidHeader(httpContext, "X-Checkout-Id");
-            var response = await service.SearchAsync(request, correlationId, checkoutId, cancellationToken);
+            var response = await service.SearchAsync(request, correlationId, cancellationToken);
             return Results.Ok(response);
         }
         catch (ArgumentException exception)
@@ -49,129 +39,28 @@ public static class RoutingEndpoints
         }
     }
 
+    private static async Task<IResult> GetRouteAsync(
+        string routeId,
+        RouteSearchService service,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var route = await service.GetRouteAsync(routeId, cancellationToken);
+            return route is null
+                ? Results.NotFound(new { error = "Route not found" })
+                : Results.Ok(route);
+        }
+        catch (ArgumentException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    }
+
     private static string? ResolveHeader(HttpContext httpContext, string name)
     {
         return httpContext.Request.Headers.TryGetValue(name, out var values)
             ? values.FirstOrDefault()
             : null;
-    }
-
-    private static Guid? TryResolveGuidHeader(HttpContext httpContext, string name)
-    {
-        var value = ResolveHeader(httpContext, name);
-        return Guid.TryParse(value, out var parsed) ? parsed : null;
-    }
-
-    private static async Task<IResult> CreateNodeAsync(
-        CreateNodeRequest request,
-        IRoutingNetworkRepository repository,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var node = await repository.CreateNodeAsync(request, cancellationToken);
-            return Results.Created($"/network/nodes/{node.Id}", node);
-        }
-        catch (ArgumentException exception)
-        {
-            return Results.BadRequest(new { error = exception.Message });
-        }
-    }
-
-    private static async Task<IResult> CreateLaneAsync(
-        CreateLaneRequest request,
-        IRoutingNetworkRepository repository,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var lane = await repository.CreateLaneAsync(request, cancellationToken);
-            return Results.Created($"/network/lanes/{lane.Id}", lane);
-        }
-        catch (ArgumentException exception)
-        {
-            return Results.BadRequest(new { error = exception.Message });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return Results.NotFound(new { error = exception.Message });
-        }
-    }
-
-    private static async Task<IResult> UpdateLaneAsync(
-        Guid laneId,
-        UpdateLaneRequest request,
-        IRoutingNetworkRepository repository,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var lane = await repository.UpdateLaneAsync(laneId, request, cancellationToken);
-            return Results.Ok(lane);
-        }
-        catch (ArgumentException exception)
-        {
-            return Results.BadRequest(new { error = exception.Message });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return Results.NotFound(new { error = exception.Message });
-        }
-    }
-
-    private static async Task<IResult> ChangeLaneStatusAsync(
-        Guid laneId,
-        ChangeLaneStatusRequest request,
-        IRoutingNetworkRepository repository,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var lane = await repository.ChangeLaneStatusAsync(laneId, request, cancellationToken);
-            return Results.Ok(lane);
-        }
-        catch (ArgumentException exception)
-        {
-            return Results.BadRequest(new { error = exception.Message });
-        }
-        catch (KeyNotFoundException exception)
-        {
-            return Results.NotFound(new { error = exception.Message });
-        }
-    }
-
-    private static async Task<IResult> GetNetworkVersionAsync(
-        string? region,
-        IConfiguration configuration,
-        IRoutingNetworkRepository repository,
-        RouteGraphStore graphStore,
-        CancellationToken cancellationToken)
-    {
-        var resolvedRegion = region ?? configuration["Routing:Region"] ?? "Brasil Sudeste";
-        var networkVersion = await repository.GetNetworkVersionAsync(resolvedRegion, cancellationToken);
-        var loadedAt = graphStore.IsLoaded ? graphStore.Current.LoadedAt : (DateTimeOffset?)null;
-
-        return Results.Ok(new NetworkVersionResponse(
-            networkVersion.Region,
-            networkVersion.Version,
-            networkVersion.UpdatedAt,
-            graphStore.IsLoaded,
-            loadedAt));
-    }
-
-    private static async Task<IResult> ReloadNetworkAsync(
-        RouteGraphLoader loader,
-        CancellationToken cancellationToken)
-    {
-        var snapshot = await loader.ReloadAsync(cancellationToken);
-
-        return Results.Ok(new
-        {
-            snapshot.Version,
-            snapshot.LoadedAt,
-            NodeCount = snapshot.Nodes.Count,
-            LaneCount = snapshot.Adjacency.Values.Sum(x => x.Count),
-            CoverageCount = snapshot.Coverages.Count
-        });
     }
 }

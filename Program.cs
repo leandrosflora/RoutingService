@@ -6,7 +6,6 @@ using RoutingService.Application.Ports;
 using RoutingService.Graph;
 using RoutingService.Infrastructure.Cache;
 using RoutingService.Infrastructure.Persistence;
-using RoutingService.Infrastructure.Messaging;
 using RoutingService.Infrastructure.Workers;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,8 +13,6 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-
-builder.Services.Configure<KafkaOptions>(builder.Configuration.GetSection("Kafka"));
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -61,18 +58,7 @@ else
     builder.Services.AddScoped<IRoutingNetworkRepository, RoutingNetworkRepository>();
 }
 builder.Services.AddScoped<IRouteSearchCache, RedisRouteSearchCache>();
-builder.Services.AddSingleton<IShippingPromiseStore, InMemoryShippingPromiseStore>();
-
-var kafkaUseMock = builder.Configuration.GetValue<bool>("Kafka:UseMock");
-if (kafkaUseMock)
-{
-    builder.Services.AddSingleton<IEventPublisher, MockEventPublisher>();
-}
-else
-{
-    builder.Services.AddSingleton<IEventPublisher, KafkaEventPublisher>();
-    builder.Services.AddHostedService<ShippingPromiseCalculatedConsumer>();
-}
+builder.Services.AddSingleton<ICalculatedRouteStore, InMemoryCalculatedRouteStore>();
 
 builder.Services.AddSingleton<TimeDependentRouteEngine>();
 builder.Services.AddSingleton<RouteGraphStore>();
