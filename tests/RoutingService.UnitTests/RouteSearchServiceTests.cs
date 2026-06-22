@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using RoutingService.Application;
 using RoutingService.Application.Ports;
 using RoutingService.Contracts;
-using RoutingService.Contracts.Events;
 using RoutingService.Domain;
 using RoutingService.Graph;
 
@@ -15,15 +14,14 @@ public sealed class RouteSearchServiceTests
     private static readonly DateTimeOffset RequestedAt = new(2026, 6, 15, 10, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task SearchAsync_CalculatesCachesAndPublishesContractEnvelope()
+    public async Task SearchAsync_CalculatesCachesAndStoresRouteDetails()
     {
         var cache = new FakeRouteSearchCache();
-        var publisher = new CapturingEventPublisher();
-        var service = CreateService(cache, publisher);
-        var checkoutId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        var routeStore = new FakeCalculatedRouteStore();
+        var service = CreateService(cache, routeStore);
         var request = CreateRequest(MaxOptions: 10);
 
-        var response = await service.SearchAsync(request, " corr-123 ", checkoutId, CancellationToken.None);
+        var response = await service.SearchAsync(request, " corr-123 ", CancellationToken.None);
 
         Assert.Equal(42, response.NetworkVersion);
         Assert.Equal("Calculated", response.Source);
@@ -33,50 +31,61 @@ public sealed class RouteSearchServiceTests
         Assert.Equal(95, route.TotalElapsedMinutes);
         Assert.NotNull(cache.StoredResponse);
         Assert.Equal(TimeSpan.FromMinutes(1), cache.StoredTtl);
-
-        var published = Assert.IsType<PublishedMessage<ShippingQuoteRequestedPayload>>(Assert.Single(publisher.Messages));
-        Assert.Equal("checkout.shipping.quote.requested", published.Envelope.EventType);
-        Assert.Equal("1.0", published.Envelope.SchemaVersion);
-        Assert.Equal("corr-123", published.Envelope.CorrelationId);
-        Assert.Equal("checkout-service", published.Envelope.Producer);
-        Assert.Equal(checkoutId.ToString("N"), published.MessageKey);
-        Assert.Equal(checkoutId, published.Envelope.Payload.CheckoutId);
-        Assert.Equal(5, published.Envelope.Payload.MaxOptions);
-        Assert.Equal(response.Routes, published.Envelope.Payload.Routes);
+        Assert.Same(route, routeStore.SavedRoutes[route.RouteId]);
     }
 
     [Fact]
-    public async Task SearchAsync_ReturnsCachedResponseAndStillPublishesRequestedEvent()
+    public async Task SearchAsync_ReturnsCachedResponseAndStoresRouteDetails()
     {
-        var cached = new SearchRoutesResponse(42, "Calculated", Array.Empty<RouteOptionResponse>());
+        var route = new RouteOptionResponse(
+            "route_cached",
+            OriginId,
+            DestinationId,
+            RequestedAt,
+            RequestedAt.AddMinutes(90),
+            90,
+            []);
+        var cached = new SearchRoutesResponse(42, "Calculated", [route]);
         var cache = new FakeRouteSearchCache { ResponseToReturn = cached };
-        var publisher = new CapturingEventPublisher();
-        var service = CreateService(cache, publisher);
+        var routeStore = new FakeCalculatedRouteStore();
+        var service = CreateService(cache, routeStore);
 
-        var response = await service.SearchAsync(CreateRequest(), null, null, CancellationToken.None);
+        var response = await service.SearchAsync(CreateRequest(), null, CancellationToken.None);
 
         Assert.Equal("Cache", response.Source);
         Assert.Null(cache.StoredResponse);
-        var published = Assert.IsType<PublishedMessage<ShippingQuoteRequestedPayload>>(Assert.Single(publisher.Messages));
-        Assert.Equal("12345678", published.MessageKey);
-        Assert.False(string.IsNullOrWhiteSpace(published.Envelope.CorrelationId));
+        Assert.Same(route, routeStore.SavedRoutes[route.RouteId]);
     }
 
     [Fact]
-    public async Task SearchAsync_RejectsInvalidRequestWithoutPublishingOrCaching()
+    public async Task SearchAsync_RejectsInvalidRequestWithoutStoringRoute()
     {
         var cache = new FakeRouteSearchCache();
-        var publisher = new CapturingEventPublisher();
-        var service = CreateService(cache, publisher);
+        var routeStore = new FakeCalculatedRouteStore();
+        var service = CreateService(cache, routeStore);
         var invalid = CreateRequest(WeightKg: 0);
 
         await Assert.ThrowsAsync<ArgumentException>(() => service.SearchAsync(invalid, CancellationToken.None));
 
-        Assert.Empty(publisher.Messages);
+        Assert.Empty(routeStore.SavedRoutes);
         Assert.Null(cache.StoredResponse);
     }
 
-    private static RouteSearchService CreateService(FakeRouteSearchCache cache, CapturingEventPublisher publisher)
+    [Fact]
+    public async Task GetRouteAsync_ReturnsStoredRouteDetails()
+    {
+        var cache = new FakeRouteSearchCache();
+        var routeStore = new FakeCalculatedRouteStore();
+        var service = CreateService(cache, routeStore);
+        var response = await service.SearchAsync(CreateRequest(), CancellationToken.None);
+        var route = Assert.Single(response.Routes);
+
+        var storedRoute = await service.GetRouteAsync(route.RouteId, CancellationToken.None);
+
+        Assert.Equal(route, storedRoute);
+    }
+
+    private static RouteSearchService CreateService(FakeRouteSearchCache cache, FakeCalculatedRouteStore routeStore)
     {
         var store = new RouteGraphStore();
         store.Replace(CreateSnapshot());
@@ -85,7 +94,7 @@ public sealed class RouteSearchServiceTests
             store,
             new TimeDependentRouteEngine(),
             cache,
-            publisher,
+            routeStore,
             NullLogger<RouteSearchService>.Instance);
     }
 
@@ -133,16 +142,20 @@ public sealed class RouteSearchServiceTests
         }
     }
 
-    private sealed class CapturingEventPublisher : IEventPublisher
+    private sealed class FakeCalculatedRouteStore : ICalculatedRouteStore
     {
-        public List<object> Messages { get; } = [];
+        public Dictionary<string, RouteOptionResponse> SavedRoutes { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public Task PublishAsync<TPayload>(EventEnvelope<TPayload> envelope, string messageKey, CancellationToken cancellationToken)
+        public Task SaveAsync(RouteOptionResponse route, CancellationToken cancellationToken)
         {
-            Messages.Add(new PublishedMessage<TPayload>(envelope, messageKey));
+            SavedRoutes[route.RouteId] = route;
             return Task.CompletedTask;
         }
-    }
 
-    private sealed record PublishedMessage<TPayload>(EventEnvelope<TPayload> Envelope, string MessageKey);
+        public Task<RouteOptionResponse?> GetAsync(string routeId, CancellationToken cancellationToken)
+        {
+            SavedRoutes.TryGetValue(routeId, out var route);
+            return Task.FromResult(route);
+        }
+    }
 }
