@@ -14,9 +14,11 @@ public sealed class MockRoutingNetworkRepository : IRoutingNetworkRepository
     private static readonly Guid CampinasHubNodeId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid RioDeJaneiroDeliveryNodeId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid BeloHorizonteDeliveryNodeId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid SaoPauloCep057DeliveryNodeId = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid SaoPauloToCampinasLaneId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid CampinasToRioLaneId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid CampinasToBeloHorizonteLaneId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid RioToSaoPauloCep057LaneId = Guid.Parse("dddddddd-dddd-dddd-dddd-ddddddddd057");
 
     public Task<long> GetCurrentVersionAsync(string region, CancellationToken cancellationToken)
     {
@@ -55,12 +57,24 @@ public sealed class MockRoutingNetworkRepository : IRoutingNetworkRepository
                 "BHZ-DLV-01",
                 NormalizeRegion(region),
                 "America/Sao_Paulo",
+                15),
+            [SaoPauloCep057DeliveryNodeId] = new(
+                SaoPauloCep057DeliveryNodeId,
+                "SP-DLV-057",
+                NormalizeRegion(region),
+                "America/Sao_Paulo",
                 15)
         };
 
         var dailyDepartures = Enum.GetValues<DayOfWeek>()
             .Select(day => new WeeklyDeparture(day, new TimeOnly(9, 0)))
             .ToList();
+        var cep057Departures = new List<WeeklyDeparture>
+        {
+            new(DayOfWeek.Tuesday, new TimeOnly(19, 0)),
+            new(DayOfWeek.Tuesday, new TimeOnly(23, 0)),
+            new(DayOfWeek.Wednesday, new TimeOnly(9, 0))
+        };
 
         var edges = new List<GraphEdge>
         {
@@ -99,7 +113,19 @@ public sealed class MockRoutingNetworkRepository : IRoutingNetworkRepository
                 30,
                 true,
                 false,
-                dailyDepartures)
+                dailyDepartures),
+            new(
+                RioToSaoPauloCep057LaneId,
+                RioDeJaneiroDeliveryNodeId,
+                SaoPauloCep057DeliveryNodeId,
+                "MELI_LOG",
+                TransportMode.Road,
+                120,
+                30,
+                30,
+                true,
+                false,
+                cep057Departures)
         };
 
         var adjacency = edges
@@ -108,6 +134,7 @@ public sealed class MockRoutingNetworkRepository : IRoutingNetworkRepository
 
         var coverages = new List<CoverageRange>
         {
+            new(5700000, 5799999, SaoPauloCep057DeliveryNodeId, 1),
             new(20000000, 28999999, RioDeJaneiroDeliveryNodeId, 1),
             new(30000000, 39999999, BeloHorizonteDeliveryNodeId, 1)
         };
