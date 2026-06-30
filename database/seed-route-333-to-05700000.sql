@@ -7,8 +7,9 @@
 --     -f database/seed-route-333-to-05700000.sql
 --
 -- Depois de executar, aguarde até 15 segundos para o RouteGraphRefreshWorker recarregar
--- a malha, ou reinicie o Routing Service. O worker só recarrega quando a versão em
--- network_versions muda.
+-- a malha, ou reinicie o Routing Service. Se a resposta continuar com
+-- "networkVersion": 1, o serviço ainda não recarregou a versão do banco ou está
+-- executando com Routing:UseMockRepository=true.
 
 BEGIN;
 
@@ -16,7 +17,7 @@ SET search_path TO routing, public;
 
 -- Garante que a região usada por appsettings.json exista e força refresh do grafo.
 INSERT INTO network_versions (region, version, updated_at)
-VALUES ('Brasil Sudeste', 1, NOW())
+VALUES ('Brasil Sudeste', 2, NOW())
 ON CONFLICT (region) DO UPDATE
 SET version = network_versions.version + 1,
     updated_at = NOW();
