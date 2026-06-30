@@ -57,6 +57,24 @@ public sealed class RouteSearchServiceTests
         Assert.Same(route, routeStore.SavedRoutes[route.RouteId]);
     }
 
+
+    [Fact]
+    public async Task SearchAsync_ReturnsNoRoutesWhenPostalCodeIsOutsideCoverage()
+    {
+        var cache = new FakeRouteSearchCache();
+        var routeStore = new FakeCalculatedRouteStore();
+        var service = CreateService(cache, routeStore);
+        var request = CreateRequest(DestinationPostalCode: "05700-000");
+
+        var response = await service.SearchAsync(request, CancellationToken.None);
+
+        Assert.Equal(42, response.NetworkVersion);
+        Assert.Equal("Calculated", response.Source);
+        Assert.Empty(response.Routes);
+        Assert.NotNull(cache.StoredResponse);
+        Assert.Empty(routeStore.SavedRoutes);
+    }
+
     [Fact]
     public async Task SearchAsync_RejectsInvalidRequestWithoutStoringRoute()
     {
@@ -98,9 +116,12 @@ public sealed class RouteSearchServiceTests
             NullLogger<RouteSearchService>.Instance);
     }
 
-    private static SearchRoutesRequest CreateRequest(decimal WeightKg = 2, int MaxOptions = 3) => new(
+    private static SearchRoutesRequest CreateRequest(
+        decimal WeightKg = 2,
+        int MaxOptions = 3,
+        string DestinationPostalCode = "12345-678") => new(
         OriginId,
-        "12345-678",
+        DestinationPostalCode,
         new PackageProfileDto(WeightKg, CubicWeightKg: 1, IsFragile: false, IsRestricted: false),
         RequestedAt,
         MaxOptions);
