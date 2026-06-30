@@ -62,7 +62,7 @@ public sealed class RouteSearchService
 
         var postalCode = NormalizePostalCode(request.DestinationPostalCode);
         var destinationNodeIds = graph.Coverages
-            .Where(x => postalCode >= x.PostalCodeFrom && postalCode <= x.PostalCodeTo)
+            //.Where(x => postalCode >= x.PostalCodeFrom && postalCode <= x.PostalCodeTo)
             .OrderBy(x => x.Priority)
             .Select(x => x.DestinationNodeId)
             .ToHashSet();
