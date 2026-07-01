@@ -61,13 +61,13 @@ public sealed class TimeDependentRouteEngineTests
 
         var originEdges = new List<GraphEdge>
         {
-            new(Guid.NewGuid(), OriginId, HubId, "MEL", TransportMode.Road, 120, 30, 30, true, false,
+            new(Guid.NewGuid(), OriginId, HubId, "MEL", "standard", TransportMode.Road, 120, 30, 30, true, false,
                 new[] { new WeeklyDeparture(DayOfWeek.Monday, new TimeOnly(12, 0)) })
         };
 
         if (includeFastIncompatibleLane)
         {
-            originEdges.Add(new GraphEdge(Guid.NewGuid(), OriginId, DestinationId, "MEL", TransportMode.Air, 60, 30, 30, false, false,
+            originEdges.Add(new GraphEdge(Guid.NewGuid(), OriginId, DestinationId, "MEL", "standard", TransportMode.Air, 60, 30, 30, false, false,
                 new[] { new WeeklyDeparture(DayOfWeek.Monday, new TimeOnly(11, 45)) }));
         }
 
@@ -76,7 +76,7 @@ public sealed class TimeDependentRouteEngineTests
             [OriginId] = originEdges,
             [HubId] = new[]
             {
-                new GraphEdge(Guid.NewGuid(), HubId, DestinationId, "MEL", TransportMode.Road, 100, 30, 30, true, false,
+                new GraphEdge(Guid.NewGuid(), HubId, DestinationId, "MEL", "standard", TransportMode.Road, 100, 30, 30, true, false,
                     new[] { new WeeklyDeparture(DayOfWeek.Monday, new TimeOnly(14, 10)) })
             }
         };

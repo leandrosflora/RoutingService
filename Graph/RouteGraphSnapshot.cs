@@ -20,6 +20,7 @@ public sealed record GraphEdge(
     Guid OriginNodeId,
     Guid DestinationNodeId,
     string CarrierCode,
+    string ServiceLevelCode,
     TransportMode Mode,
     int TransitMinutes,
     decimal MaximumWeightKg,

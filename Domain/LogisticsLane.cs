@@ -6,6 +6,7 @@ public sealed class LogisticsLane
     public Guid OriginNodeId { get; private set; }
     public Guid DestinationNodeId { get; private set; }
     public string CarrierCode { get; private set; } = default!;
+    public string ServiceLevelCode { get; private set; } = default!;
     public TransportMode Mode { get; private set; }
     public int TransitMinutes { get; private set; }
     public decimal MaximumWeightKg { get; private set; }
@@ -24,6 +25,7 @@ public sealed class LogisticsLane
         Guid originNodeId,
         Guid destinationNodeId,
         string carrierCode,
+        string serviceLevelCode,
         TransportMode mode,
         int transitMinutes,
         decimal maximumWeightKg,
@@ -32,12 +34,15 @@ public sealed class LogisticsLane
         bool supportsRestrictedItems,
         IEnumerable<LaneSchedule>? schedules = null)
     {
-        Validate(originNodeId, destinationNodeId, carrierCode, transitMinutes, maximumWeightKg, maximumCubicWeightKg);
+        Validate(originNodeId, destinationNodeId, carrierCode, serviceLevelCode, transitMinutes, maximumWeightKg, maximumCubicWeightKg);
 
         Id = Guid.NewGuid();
         OriginNodeId = originNodeId;
         DestinationNodeId = destinationNodeId;
         CarrierCode = carrierCode.Trim().ToUpperInvariant();
+        // Not upper-invariant: CarrierService/ShippingPricingService store this as-is
+        // (e.g. "same_day", "standard") and compare it verbatim / case-insensitively.
+        ServiceLevelCode = serviceLevelCode.Trim();
         Mode = mode;
         TransitMinutes = transitMinutes;
         MaximumWeightKg = maximumWeightKg;
@@ -77,7 +82,7 @@ public sealed class LogisticsLane
         bool supportsRestrictedItems,
         IEnumerable<LaneSchedule> schedules)
     {
-        Validate(OriginNodeId, DestinationNodeId, CarrierCode, transitMinutes, maximumWeightKg, maximumCubicWeightKg);
+        Validate(OriginNodeId, DestinationNodeId, CarrierCode, ServiceLevelCode, transitMinutes, maximumWeightKg, maximumCubicWeightKg);
 
         TransitMinutes = transitMinutes;
         MaximumWeightKg = maximumWeightKg;
@@ -98,6 +103,7 @@ public sealed class LogisticsLane
         Guid originNodeId,
         Guid destinationNodeId,
         string carrierCode,
+        string serviceLevelCode,
         int transitMinutes,
         decimal maximumWeightKg,
         decimal maximumCubicWeightKg)
@@ -113,6 +119,9 @@ public sealed class LogisticsLane
 
         if (string.IsNullOrWhiteSpace(carrierCode))
             throw new ArgumentException("Carrier code is required", nameof(carrierCode));
+
+        if (string.IsNullOrWhiteSpace(serviceLevelCode))
+            throw new ArgumentException("Service level code is required", nameof(serviceLevelCode));
 
         if (transitMinutes <= 0)
             throw new ArgumentException("Transit minutes must be positive", nameof(transitMinutes));

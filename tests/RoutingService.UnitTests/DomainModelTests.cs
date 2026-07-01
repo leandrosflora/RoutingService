@@ -29,6 +29,7 @@ public sealed class DomainModelTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             " mel ",
+            "standard",
             TransportMode.Road,
             transitMinutes: 120,
             maximumWeightKg: 10,

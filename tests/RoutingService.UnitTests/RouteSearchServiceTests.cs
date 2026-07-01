@@ -138,7 +138,7 @@ public sealed class RouteSearchServiceTests
         {
             [OriginId] = new[]
             {
-                new GraphEdge(Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"), OriginId, DestinationId, "MEL", TransportMode.Road, 90, 30, 30, true, true,
+                new GraphEdge(Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"), OriginId, DestinationId, "MEL", "standard", TransportMode.Road, 90, 30, 30, true, true,
                     new[] { new WeeklyDeparture(DayOfWeek.Monday, new TimeOnly(10, 0)) })
             }
         };

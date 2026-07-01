@@ -44,6 +44,7 @@ public sealed class RoutingDbContext : DbContext
             entity.Property(x => x.OriginNodeId).HasColumnName("origin_node_id").IsRequired();
             entity.Property(x => x.DestinationNodeId).HasColumnName("destination_node_id").IsRequired();
             entity.Property(x => x.CarrierCode).HasColumnName("carrier_code").HasMaxLength(80).IsRequired();
+            entity.Property(x => x.ServiceLevelCode).HasColumnName("service_level_code").HasMaxLength(80).IsRequired();
             entity.Property(x => x.Mode).HasColumnName("mode").HasConversion<string>().HasMaxLength(40).IsRequired();
             entity.Property(x => x.TransitMinutes).HasColumnName("transit_minutes").IsRequired();
             entity.Property(x => x.MaximumWeightKg).HasColumnName("maximum_weight_kg").HasPrecision(10, 3).IsRequired();

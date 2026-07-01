@@ -50,15 +50,15 @@ public sealed class RouteSearchService
 
         var requestedAt = (request.RequestedAtUtc ?? DateTimeOffset.UtcNow).ToUniversalTime();
         var graph = _graphStore.Current;
-        var cacheKey = RouteCacheKeyFactory.Build(graph.Version, request, requestedAt);
-        var cached = await _cache.GetAsync(cacheKey, cancellationToken);
+        //var cacheKey = RouteCacheKeyFactory.Build(graph.Version, request, requestedAt);
+        //var cached = await _cache.GetAsync(cacheKey, cancellationToken);
 
-        if (cached is not null)
-        {
-            var cachedResponse = cached with { Source = "Cache" };
-            await SaveRouteDetailsAsync(cachedResponse, cancellationToken);
-            return cachedResponse;
-        }
+        //if (cached is not null)
+        //{
+        //    var cachedResponse = cached with { Source = "Cache" };
+        //    await SaveRouteDetailsAsync(cachedResponse, cancellationToken);
+        //    return cachedResponse;
+        //}
 
         var postalCode = NormalizePostalCode(request.DestinationPostalCode);
         var destinationNodeIds = graph.Coverages
@@ -70,7 +70,7 @@ public sealed class RouteSearchService
         if (destinationNodeIds.Count == 0)
         {
             var empty = new SearchRoutesResponse(graph.Version, "Calculated", []);
-            await _cache.SetAsync(cacheKey, empty, CacheTtl, cancellationToken);
+            //await _cache.SetAsync(cacheKey, empty, CacheTtl, cancellationToken);
             return empty;
         }
 
@@ -87,7 +87,7 @@ public sealed class RouteSearchService
             "Calculated",
             calculatedRoutes.Select(x => Map(graph.Version, x)).ToList());
 
-        await _cache.SetAsync(cacheKey, response, CacheTtl, cancellationToken);
+        //await _cache.SetAsync(cacheKey, response, CacheTtl, cancellationToken);
         await SaveRouteDetailsAsync(response, cancellationToken);
         _logger.LogInformation(
             "Routes calculated routeCount={RouteCount} correlationId={CorrelationId}",
@@ -130,6 +130,7 @@ public sealed class RouteSearchService
                 x.Destination.Id,
                 x.Destination.Code,
                 x.Edge.CarrierCode,
+                x.Edge.ServiceLevelCode,
                 x.Edge.Mode,
                 x.DepartureAt,
                 x.ArrivalAt,

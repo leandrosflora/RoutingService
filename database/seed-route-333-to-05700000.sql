@@ -1,4 +1,4 @@
--- Seed de malha logística para o Routing Service retornar rota no payload:
+-- Verificação do trajeto:
 -- originNodeId = 33333333-3333-3333-3333-333333333333
 -- destinationPostalCode = 05700000
 --
@@ -6,159 +6,34 @@
 --   psql "Host=localhost Port=5432 Dbname=logistica_envios User=logistica options=--search_path=routing,public" \
 --     -f database/seed-route-333-to-05700000.sql
 --
--- Depois de executar, aguarde até 15 segundos para o RouteGraphRefreshWorker recarregar
--- a malha, ou reinicie o Routing Service. Se a resposta continuar com
--- "networkVersion": 1, o serviço ainda não recarregou a versão do banco ou está
--- executando com Routing:UseMockRepository=true.
-
-BEGIN;
+-- IMPORTANTE (revisado): este script foi originalmente escrito para popular um schema
+-- routing vazio, e depois foi ajustado para adicionar uma lane extra (transportadora
+-- fictícia "MELI_LOG") entre nodes já existentes no `logistica-envios-init.sql`. Essa
+-- lane nunca funcionava de ponta a ponta: "MELI_LOG" não é um carrier cadastrado em
+-- carrier.carriers (só CARRIER_1/CARRIER_2 existem), então o CarrierService sempre
+-- respondia CarrierNotFound para ela, independente da rota do RoutingService.
+--
+-- A causa raiz de "no_options_available" para todos os produtos era outra: o
+-- RoutingService nunca expunha um `service_level_code` de transportadora nas legs de
+-- rota (só carrega `carrier_code`/`mode` de transporte), então ShippingPromiseService
+-- forjava um serviceLevelCode a partir do modo de transporte (ex.: "Road"/"LastMile") ao
+-- chamar o CarrierService — que nunca bate com os códigos reais ("same_day"/"standard"),
+-- fazendo toda checagem de disponibilidade de transportadora falhar. Isso foi corrigido
+-- adicionando a coluna `routing.logistics_lanes.service_level_code` (populada em
+-- `logistica-envios-init.sql` com os códigos reais de carrier.carrier_service_levels) e
+-- propagando esse valor real pelo RoutingService/ShippingPromiseService.
+--
+-- Com esse fix, a lane já cadastrada em logistica-envios-init.sql
+-- (id 77777777-7777-7777-7777-777777777902, CARRIER_2/standard, direta de
+-- 33333333-3333-3333-3333-333333333333 até 77777777-7777-7777-7777-777777777901) já é
+-- suficiente para essa origem/CEP. Este script não insere mais nada — só verifica.
 
 SET search_path TO routing, public;
 
--- Garante que a região usada por appsettings.json exista e força refresh do grafo.
-INSERT INTO network_versions (region, version, updated_at)
-VALUES ('Brasil Sudeste', 2, NOW())
-ON CONFLICT (region) DO UPDATE
-SET version = network_versions.version + 1,
-    updated_at = NOW();
-
--- Origem usada pelo payload informado.
-INSERT INTO logistics_nodes (
-    id,
-    code,
-    name,
-    region,
-    time_zone_id,
-    type,
-    handling_minutes,
-    is_active
-)
-VALUES (
-    '33333333-3333-3333-3333-333333333333',
-    'RIO-DLV-01',
-    'Rio de Janeiro Delivery Station 01',
-    'Brasil Sudeste',
-    'America/Sao_Paulo',
-    'LastMileStation',
-    15,
-    TRUE
-)
-ON CONFLICT (id) DO UPDATE
-SET code = EXCLUDED.code,
-    name = EXCLUDED.name,
-    region = EXCLUDED.region,
-    time_zone_id = EXCLUDED.time_zone_id,
-    type = EXCLUDED.type,
-    handling_minutes = EXCLUDED.handling_minutes,
-    is_active = TRUE;
-
--- Nó destino que cobre o CEP 05700000 (São Paulo). O serviço calcula até o nó de
--- cobertura postal, não até o CEP individual.
-INSERT INTO logistics_nodes (
-    id,
-    code,
-    name,
-    region,
-    time_zone_id,
-    type,
-    handling_minutes,
-    is_active
-)
-VALUES (
-    '55555555-5555-5555-5555-555555555555',
-    'SP-DLV-057',
-    'São Paulo Delivery Station CEP 057',
-    'Brasil Sudeste',
-    'America/Sao_Paulo',
-    'LastMileStation',
-    15,
-    TRUE
-)
-ON CONFLICT (id) DO UPDATE
-SET code = EXCLUDED.code,
-    name = EXCLUDED.name,
-    region = EXCLUDED.region,
-    time_zone_id = EXCLUDED.time_zone_id,
-    type = EXCLUDED.type,
-    handling_minutes = EXCLUDED.handling_minutes,
-    is_active = TRUE;
-
--- Mantém o script idempotente para os registros controlados por este seed.
-DELETE FROM lane_schedules
-WHERE logistics_lane_id = 'dddddddd-dddd-dddd-dddd-ddddddddd057';
-
-DELETE FROM logistics_lanes
-WHERE id = 'dddddddd-dddd-dddd-dddd-ddddddddd057';
-
-DELETE FROM postal_coverages
-WHERE id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeee0057';
-
--- Lane direta compatível com o pacote informado:
--- weightKg=0.450, cubicWeightKg=0.469333..., isFragile=false, isRestricted=false.
-INSERT INTO logistics_lanes (
-    id,
-    origin_node_id,
-    destination_node_id,
-    carrier_code,
-    mode,
-    transit_minutes,
-    maximum_weight_kg,
-    maximum_cubic_weight_kg,
-    supports_fragile_items,
-    supports_restricted_items,
-    status,
-    version
-)
-VALUES (
-    'dddddddd-dddd-dddd-dddd-ddddddddd057',
-    '33333333-3333-3333-3333-333333333333',
-    '55555555-5555-5555-5555-555555555555',
-    'MELI_LOG',
-    'Road',
-    120,
-    30.000,
-    30.000,
-    TRUE,
-    FALSE,
-    'Active',
-    1
-);
-
--- Terça-feira às 19:00 America/Sao_Paulo equivale a 22:00 UTC em 2026-06-30,
--- portanto fica após requestedAtUtc=2026-06-30T21:42:26.418Z.
-INSERT INTO lane_schedules (
-    id,
-    logistics_lane_id,
-    day_of_week,
-    departure_time,
-    is_active
-)
-VALUES
-    ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaa05701', 'dddddddd-dddd-dddd-dddd-ddddddddd057', 'Tuesday', TIME '19:00:00', TRUE),
-    ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaa05702', 'dddddddd-dddd-dddd-dddd-ddddddddd057', 'Tuesday', TIME '23:00:00', TRUE),
-    ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaa05703', 'dddddddd-dddd-dddd-dddd-ddddddddd057', 'Wednesday', TIME '09:00:00', TRUE);
-
--- Cobertura postal que faz o CEP 05700000 resolver para o nó destino acima.
-INSERT INTO postal_coverages (
-    id,
-    destination_node_id,
-    postal_code_from,
-    postal_code_to,
-    priority
-)
-VALUES (
-    'eeeeeeee-eeee-eeee-eeee-eeeeeeee0057',
-    '55555555-5555-5555-5555-555555555555',
-    5700000,
-    5799999,
-    1
-);
-
-COMMIT;
-
--- Conferência rápida: deve retornar a lane e a cobertura criadas por este seed.
 SELECT
     lane.id AS lane_id,
+    lane.carrier_code,
+    lane.service_level_code,
     origin.code AS origin_code,
     destination.code AS destination_code,
     coverage.postal_code_from,
@@ -172,5 +47,7 @@ JOIN logistics_nodes destination ON destination.id = lane.destination_node_id
 JOIN postal_coverages coverage ON coverage.destination_node_id = destination.id
 JOIN lane_schedules schedule ON schedule.logistics_lane_id = lane.id
 JOIN network_versions version ON version.region = origin.region
-WHERE lane.id = 'dddddddd-dddd-dddd-dddd-ddddddddd057'
+WHERE lane.origin_node_id = '33333333-3333-3333-3333-333333333333'
+  AND coverage.postal_code_from <= 5700000
+  AND coverage.postal_code_to >= 5700000
 ORDER BY schedule.day_of_week, schedule.departure_time;

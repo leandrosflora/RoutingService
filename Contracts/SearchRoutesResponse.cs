@@ -25,6 +25,7 @@ public sealed record RouteLegResponse(
     Guid DestinationNodeId,
     string DestinationCode,
     string CarrierCode,
+    string ServiceLevelCode,
     TransportMode Mode,
     DateTimeOffset DepartureAt,
     DateTimeOffset ArrivalAt,
